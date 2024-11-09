@@ -26,21 +26,21 @@ This script serves as a test case for these challenges, implementing six differe
 ## Installation
 
 **Create virtual environment**
-python -m venv venv
+```python -m venv venv```
 
 **Activate virtual environment**
 **On Windows:**
-.\venv\Scripts\activate
+```.\venv\Scripts\activate```
 **On Unix or MacOS:**
-source venv/bin/activate
+```source venv/bin/activate```
 
 **Install dependencies**
-pip install -r requirements.txt
+```pip install -r requirements.txt```
 
 ## Usage
 
 Run the script to see the visualization of all six inscribed shape cases:
-python inscribed_shapes.py
+```python inscribed_shapes.py```
 
 ## License
 
