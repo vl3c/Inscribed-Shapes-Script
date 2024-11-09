@@ -23,41 +23,133 @@ class Shape:
     def get_vertices(self):
         raise NotImplementedError("Subclasses should implement this method.")
 
+# Base Positioning System
+class ShapePositioner:
+    def get_position(self, shape, parent=None, grandparent=None):
+        raise NotImplementedError()
+
+    def get_vertices(self, shape, parent=None, grandparent=None):
+        raise NotImplementedError()
+
+class CirclePositioner(ShapePositioner):
+    def get_position(self, shape, parent=None, grandparent=None):
+        if isinstance(parent, Triangle):
+            h = (np.sqrt(3) / 2) * parent.side_length
+            
+            if parent.rotate_base_down:
+                # For case 6: Triangle with base down
+                return (0, -h/3 + shape.radius)
+            else:
+                # For case 4: Triangle with base up
+                if isinstance(parent.parent, Square):
+                    S = parent.parent.side_length / 2
+                    triangle_bottom_y = S - h
+                    return (0, triangle_bottom_y + shape.radius)
+                return (0, 0)
+        elif isinstance(parent, Square):
+            if isinstance(parent.parent, Triangle):
+                h = (np.sqrt(3) / 2) * parent.parent.side_length
+                return (0, -h/3 + parent.side_length/2)
+            return (0, 0)
+        return (0, 0)
+
+    def get_vertices(self, shape, parent=None, grandparent=None):
+        pos = self.get_position(shape, parent, grandparent)
+        angles = np.linspace(0, 360, 9)[:-1]  # 0 to 315 degrees
+        return [(shape.radius * np.cos(np.deg2rad(a)) + pos[0],
+                shape.radius * np.sin(np.deg2rad(a)) + pos[1])
+                for a in angles]
+
+class SquarePositioner(ShapePositioner):
+    def get_position(self, shape, parent=None, grandparent=None):
+        if isinstance(parent, Triangle):
+            h = (np.sqrt(3) / 2) * parent.side_length
+            if parent.rotate_base_down:
+                # For case 6: Triangle with base down
+                return (0, -h/3)
+            else:
+                # For case 2: Triangle inscribed in circle
+                if isinstance(parent.parent, Circle):
+                    R = parent.parent.radius
+                    return (0, -R * np.cos(np.pi/3))
+                else:
+                    return (0, -h/2)
+        return (0, 0)
+
+    def get_vertices(self, shape, parent=None, grandparent=None):
+        pos = self.get_position(shape, parent, grandparent)
+        if isinstance(parent, Triangle):
+            h = (np.sqrt(3) / 2) * parent.side_length
+            if parent.rotate_base_down:
+                triangle_bottom_y = -h/3
+            else:
+                if isinstance(parent.parent, Circle):
+                    R = parent.parent.radius
+                    triangle_bottom_y = -R * np.cos(np.pi/3)
+                else:
+                    triangle_bottom_y = -h/2
+            
+            half_side = shape.side_length / 2
+            square_bottom_y = triangle_bottom_y
+            square_top_y = square_bottom_y + shape.side_length
+            
+            return [
+                (-half_side, square_top_y),    # Top-left
+                (half_side, square_top_y),     # Top-right
+                (half_side, square_bottom_y),  # Bottom-right
+                (-half_side, square_bottom_y)  # Bottom-left
+            ]
+        else:
+            S = shape.side_length / 2
+            return [
+                (-S + pos[0], S + pos[1]),    # Top-left
+                (S + pos[0], S + pos[1]),     # Top-right
+                (S + pos[0], -S + pos[1]),    # Bottom-right
+                (-S + pos[0], -S + pos[1])    # Bottom-left
+            ]
+
+class TrianglePositioner(ShapePositioner):
+    def get_position(self, shape, parent=None, grandparent=None):
+        return (0, 0)  # Position will be handled in get_vertices
+
+    def get_vertices(self, shape, parent=None, grandparent=None):
+        h = (np.sqrt(3) / 2) * shape.side_length
+
+        if shape.rotate_base_down:
+            # Base at bottom, for cases 5 and 6
+            return [
+                (0, 2*h/3),                      # Top vertex
+                (-shape.side_length/2, -h/3),    # Bottom-left vertex
+                (shape.side_length/2, -h/3)      # Bottom-right vertex
+            ]
+        elif isinstance(parent, Circle):
+            # For case 2: vertices touch circle at 90°, 210°, and 330°
+            R = parent.radius
+            return [
+                (0, R),                                    # Top vertex
+                (-R * np.sin(np.pi/3), -R * np.cos(np.pi/3)),  # Bottom-left
+                (R * np.sin(np.pi/3), -R * np.cos(np.pi/3))    # Bottom-right
+            ]
+        else:
+            # Original orientation (base at top) for other cases
+            S = shape.side_length / 2
+            return [
+                (-shape.side_length/2, S-h),    # Bottom-left vertex
+                (shape.side_length/2, S-h),     # Bottom-right vertex
+                (0, S)                          # Top vertex
+            ]
+
 # Circle Shape
 class Circle(Shape):
     def __init__(self, radius, **kwargs):
         super().__init__(**kwargs)
         self.radius = radius
+        self._positioner = CirclePositioner()
 
     def plot(self, ax):
-        # Check if this circle is inscribed in a triangle
-        if isinstance(self.parent, Triangle):
-            # Calculate triangle height
-            h = (np.sqrt(3) / 2) * self.parent.side_length
-            
-            if self.parent.rotate_base_down:
-                # For case 6: Triangle with base down
-                circle_center_y = -h/3 + self.radius
-            else:
-                # For case 4: Triangle with base up
-                if isinstance(self.parent.parent, Square):
-                    S = self.parent.parent.side_length / 2
-                    triangle_bottom_y = S - h
-                    circle_center_y = triangle_bottom_y + self.radius
-        elif isinstance(self.parent, Square):
-            # For case 6: Circle inscribed in square
-            if isinstance(self.parent.parent, Triangle):
-                # Get triangle height for positioning
-                h = (np.sqrt(3) / 2) * self.parent.parent.side_length
-                # Square is positioned at -h/3 + square_height/2
-                circle_center_y = -h/3 + self.parent.side_length/2
-            else:
-                circle_center_y = 0
-        else:
-            # Default case
-            circle_center_y = 0
-            
-        circle = MplCircle((0, circle_center_y), self.radius,
+        pos = self._positioner.get_position(self, self.parent, 
+                                          self.parent.parent if self.parent else None)
+        circle = MplCircle(pos, self.radius,
                          edgecolor=self.color,
                          facecolor=self.facecolor,
                          linewidth=self.linewidth,
@@ -66,75 +158,19 @@ class Circle(Shape):
         return circle
 
     def get_vertices(self):
-        if isinstance(self.parent, Triangle):
-            h = (np.sqrt(3) / 2) * self.parent.side_length
-            
-            if self.parent.rotate_base_down:
-                circle_center_y = -h/3 + self.radius
-            else:
-                if isinstance(self.parent.parent, Square):
-                    S = self.parent.parent.side_length / 2
-                    triangle_bottom_y = S - h
-                    circle_center_y = triangle_bottom_y + self.radius
-        elif isinstance(self.parent, Square):
-            if isinstance(self.parent.parent, Triangle):
-                h = (np.sqrt(3) / 2) * self.parent.parent.side_length
-                circle_center_y = -h/3 + self.parent.side_length/2
-            else:
-                circle_center_y = 0
-        else:
-            circle_center_y = 0
-            
-        angles = np.linspace(0, 360, 9)[:-1]  # 0 to 315 degrees
-        return [(self.radius * np.cos(np.deg2rad(a)), 
-                self.radius * np.sin(np.deg2rad(a)) + circle_center_y) 
-                for a in angles]
+        return self._positioner.get_vertices(self, self.parent,
+                                           self.parent.parent if self.parent else None)
 
 # Square Shape
 class Square(Shape):
     def __init__(self, side_length, **kwargs):
         super().__init__(**kwargs)
         self.side_length = side_length
+        self._positioner = SquarePositioner()
 
     def plot(self, ax):
-        if isinstance(self.parent, Triangle):
-            # Calculate the height of the triangle
-            h = (np.sqrt(3) / 2) * self.parent.side_length
-            
-            if self.parent.rotate_base_down:
-                # For case 6: Triangle is outer shape with base down
-                # Triangle vertices are at: (0, 2h/3) top and (±side/2, -h/3) bottom
-                # Square should be positioned relative to these points
-                triangle_bottom_y = -h/3
-            else:
-                # For case 2: Triangle inscribed in circle
-                if isinstance(self.parent.parent, Circle):
-                    R = self.parent.parent.radius
-                    triangle_bottom_y = -R * np.cos(np.pi/3)
-                else:
-                    triangle_bottom_y = -h/2
-            
-            # Position square so its bottom aligns with triangle's bottom
-            half_side = self.side_length / 2
-            square_bottom_y = triangle_bottom_y
-            square_top_y = square_bottom_y + self.side_length
-            
-            vertices = np.array([
-                [-half_side, square_top_y],    # Top-left
-                [half_side, square_top_y],     # Top-right
-                [half_side, square_bottom_y],  # Bottom-right
-                [-half_side, square_bottom_y]  # Bottom-left
-            ])
-        else:
-            # Original square positioning for other cases
-            S = self.side_length / 2
-            vertices = np.array([
-                [-S, S],   # Top-left
-                [S, S],    # Top-right
-                [S, -S],   # Bottom-right
-                [-S, -S]   # Bottom-left
-            ])
-
+        vertices = self._positioner.get_vertices(self, self.parent,
+                                               self.parent.parent if self.parent else None)
         square = MplPolygon(vertices, closed=True,
                            edgecolor=self.color,
                            facecolor=self.facecolor,
@@ -144,35 +180,8 @@ class Square(Shape):
         return square
 
     def get_vertices(self):
-        if isinstance(self.parent, Triangle):
-            h = (np.sqrt(3) / 2) * self.parent.side_length
-            if self.parent.rotate_base_down:
-                triangle_bottom_y = -h/3
-            else:
-                if isinstance(self.parent.parent, Circle):
-                    R = self.parent.parent.radius
-                    triangle_bottom_y = -R * np.cos(np.pi/3)
-                else:
-                    triangle_bottom_y = -h/2
-            
-            half_side = self.side_length / 2
-            square_bottom_y = triangle_bottom_y
-            square_top_y = square_bottom_y + self.side_length
-            
-            return [
-                (-half_side, square_top_y),    # Top-left
-                (half_side, square_top_y),     # Top-right
-                (half_side, square_bottom_y),  # Bottom-right
-                (-half_side, square_bottom_y)  # Bottom-left
-            ]
-        else:
-            S = self.side_length / 2
-            return [
-                (-S, S),   # Top-left
-                (S, S),    # Top-right
-                (S, -S),   # Bottom-right
-                (-S, -S)   # Bottom-left
-            ]
+        return self._positioner.get_vertices(self, self.parent,
+                                           self.parent.parent if self.parent else None)
 
 # Triangle Shape
 class Triangle(Shape):
@@ -180,36 +189,11 @@ class Triangle(Shape):
         super().__init__(**kwargs)
         self.side_length = side_length
         self.rotate_base_down = rotate_base_down
+        self._positioner = TrianglePositioner()
 
     def plot(self, ax):
-        h = (np.sqrt(3) / 2) * self.side_length  # Height of the triangle
-
-        if self.rotate_base_down:
-            # Base at bottom, for cases 5 and 6
-            vertices = np.array([
-                [0, 2*h/3],                      # Top vertex
-                [-self.side_length/2, -h/3],     # Bottom-left vertex
-                [self.side_length/2, -h/3]       # Bottom-right vertex
-            ])
-        else:
-            # Check if this triangle is inscribed in a circle
-            if isinstance(self.parent, Circle):
-                # For case 2: vertices touch circle at 90°, 210°, and 330°
-                R = self.parent.radius
-                vertices = np.array([
-                    [0, R],                                    # Top vertex (90°)
-                    [-R * np.sin(np.pi/3), -R * np.cos(np.pi/3)],  # Bottom-left (210°)
-                    [R * np.sin(np.pi/3), -R * np.cos(np.pi/3)]    # Bottom-right (330°)
-                ])
-            else:
-                # Original orientation (base at top) for other cases
-                S = self.side_length / 2
-                vertices = np.array([
-                    [-self.side_length/2, S-h],    # Bottom-left vertex
-                    [self.side_length/2, S-h],     # Bottom-right vertex
-                    [0, S]                         # Top vertex
-                ])
-
+        vertices = self._positioner.get_vertices(self, self.parent,
+                                               self.parent.parent if self.parent else None)
         triangle = MplPolygon(vertices, closed=True,
                             edgecolor=self.color,
                             facecolor=self.facecolor,
@@ -219,29 +203,8 @@ class Triangle(Shape):
         return triangle
 
     def get_vertices(self):
-        h = (np.sqrt(3) / 2) * self.side_length
-        
-        if self.rotate_base_down:
-            return [
-                (0, 2*h/3),                      # Top vertex
-                (-self.side_length/2, -h/3),     # Bottom-left vertex
-                (self.side_length/2, -h/3)       # Bottom-right vertex
-            ]
-        else:
-            if isinstance(self.parent, Circle):
-                R = self.parent.radius
-                return [
-                    (0, R),                                    # Top vertex
-                    (-R * np.sin(np.pi/3), -R * np.cos(np.pi/3)),  # Bottom-left
-                    (R * np.sin(np.pi/3), -R * np.cos(np.pi/3))    # Bottom-right
-                ]
-            else:
-                S = self.side_length / 2
-                return [
-                    (-self.side_length/2, S-h),    # Bottom-left vertex
-                    (self.side_length/2, S-h),     # Bottom-right vertex
-                    (0, S)                         # Top vertex
-                ]
+        return self._positioner.get_vertices(self, self.parent,
+                                           self.parent.parent if self.parent else None)
 
 # ShapeHierarchy class to manage the hierarchy and plotting
 class ShapeHierarchy:
@@ -497,7 +460,7 @@ class TestShapeHierarchy(unittest.TestCase):
         # Calculate sizes
         R = 1.0
         S = shape_hierarchy.inscribe_square_in_circle(R)  # S = sqrt(2)
-        T = shape_hierarchy.inscribe_triangle_in_square(S)  # T = (sqrt(3)/2)*S ≈0.8660 *1.4142≈1.2247
+        T = shape_hierarchy.inscribe_triangle_in_square(S)  # T = (sqrt(3)/2)*S ≈0.8660 *1.41421.2247
 
         # Get Triangle vertices
         triangle = Triangle(T)
