@@ -17,6 +17,8 @@ This script serves as a test case for these challenges, implementing six differe
 5. Circle > Square > Triangle
 6. Triangle > Square > Circle
 
+![image](https://github.com/user-attachments/assets/aabc9a19-1e35-4aef-9ca6-4c0e391f920e)
+
 ## Requirements
 
 - Python 3.x
