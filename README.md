@@ -30,10 +30,10 @@ This script serves as a test case for these challenges, implementing six differe
 
 **Activate virtual environment**
 
-**On Windows:**
+On Windows:
 ```.\venv\Scripts\activate```
 
-**On Unix or MacOS:**
+On Unix or MacOS:
 ```source venv/bin/activate```
 
 **Install dependencies**
