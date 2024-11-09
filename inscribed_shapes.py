@@ -5,6 +5,7 @@ from matplotlib.patches import Circle as MplCircle, Rectangle as MplRectangle, P
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib import transforms
+from matplotlib.path import Path
 from itertools import permutations
 import unittest
 
@@ -416,52 +417,103 @@ def point_in_triangle(x: float, y: float, T: float, rotate_base_down: bool = Fal
                      center: Tuple[float, float] = (0, 0)) -> bool:
     """
     Check if point (x,y) is inside an equilateral triangle with side length T.
-    
-    Args:
-        x, y: Point coordinates
-        T: Triangle side length
-        rotate_base_down: If True, triangle has base at bottom, otherwise base at top
-        center: Center point of the triangle
+    Uses barycentric coordinates for robust point-in-triangle testing.
     """
     # Translate point to origin-centered coordinate system
     x_rel = x - center[0]
     y_rel = y - center[1]
     
-    h: float = (np.sqrt(3) / 2) * T
+    h = (np.sqrt(3) / 2) * T
     
+    # Define triangle vertices based on orientation
     if rotate_base_down:
-        # Triangle with base at bottom
-        A: np.ndarray = np.array([-T/2, -h/3])  # Bottom left
-        B: np.ndarray = np.array([T/2, -h/3])   # Bottom right
-        C: np.ndarray = np.array([0, 2*h/3])    # Top
+        # Base at bottom
+        vertices = np.array([
+            [0, 2*h/3],                  # Top
+            [-T/2, -h/3],                # Bottom left
+            [T/2, -h/3]                  # Bottom right
+        ])
     else:
-        # Triangle with base at top
-        A: np.ndarray = np.array([-T/2, h/2])   # Top left
-        B: np.ndarray = np.array([T/2, h/2])    # Top right
-        C: np.ndarray = np.array([0, -h/2])     # Bottom
+        # Base at top
+        vertices = np.array([
+            [-T/2, h/2],                 # Top left
+            [T/2, h/2],                  # Top right
+            [0, -h/2]                    # Bottom
+        ])
     
-    # Compute vectors
-    v0: np.ndarray = C - A
-    v1: np.ndarray = B - A
-    v2: np.ndarray = np.array([x_rel, y_rel]) - A
+    # Function to compute barycentric coordinates
+    def barycentric(p: np.ndarray, a: np.ndarray, b: np.ndarray, c: np.ndarray) -> Tuple[float, float, float]:
+        v0 = b - a
+        v1 = c - a
+        v2 = p - a
+        
+        d00 = np.dot(v0, v0)
+        d01 = np.dot(v0, v1)
+        d11 = np.dot(v1, v1)
+        d20 = np.dot(v2, v0)
+        d21 = np.dot(v2, v1)
+        
+        denom = d00 * d11 - d01 * d01
+        if abs(denom) < 1e-10:
+            return (-1, -1, -1)
+            
+        v = (d11 * d20 - d01 * d21) / denom
+        w = (d00 * d21 - d01 * d20) / denom
+        u = 1.0 - v - w
+        return (u, v, w)
+    
+    # Get barycentric coordinates
+    point = np.array([x_rel, y_rel])
+    u, v, w = barycentric(point, vertices[0], vertices[1], vertices[2])
+    
+    # Check if point is inside triangle (with tolerance for floating-point errors)
+    tolerance = 1e-10
+    return (u >= -tolerance and v >= -tolerance and w >= -tolerance and 
+            abs(1 - (u + v + w)) < tolerance)
 
-    # Compute dot products
-    dot00: float = np.dot(v0, v0)
-    dot01: float = np.dot(v0, v1)
-    dot02: float = np.dot(v0, v2)
-    dot11: float = np.dot(v1, v1)
-    dot12: float = np.dot(v1, v2)
+def point_in_polygon(x: float, y: float, vertices: List[Tuple[float, float]], tolerance: float = 1e-9) -> bool:
+    """Check if point (x,y) is inside a polygon defined by vertices, including points on the edge."""
+    num_vertices = len(vertices)
+    inside = False
 
-    # Compute barycentric coordinates
-    denom: float = dot00 * dot11 - dot01 * dot01
-    if abs(denom) < 1e-8:  # Avoid division by zero
+    x_coords, y_coords = zip(*vertices)
+    for i in range(num_vertices):
+        xi, yi = x_coords[i], y_coords[i]
+        xj, yj = x_coords[(i + 1) % num_vertices], y_coords[(i + 1) % num_vertices]
+
+        if ((yi > y) != (yj > y)):
+            x_intersect = (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi
+            if x <= x_intersect + tolerance:
+                inside = not inside
+
+    # Check if point is on a vertex
+    for vx, vy in vertices:
+        if abs(x - vx) <= tolerance and abs(y - vy) <= tolerance:
+            return True
+
+    # Check if point is on an edge
+    for i in range(num_vertices):
+        xi, yi = vertices[i]
+        xj, yj = vertices[(i + 1) % num_vertices]
+        if point_on_line_segment(xi, yi, xj, yj, x, y, tolerance):
+            return True
+
+    return inside
+
+def point_on_line_segment(x1: float, y1: float, x2: float, y2: float,
+                          px: float, py: float, tolerance: float) -> bool:
+    """Check if point (px, py) lies on the line segment from (x1, y1) to (x2, y2)."""
+    line_mag = np.hypot(x2 - x1, y2 - y1)
+    if line_mag < tolerance:
+        return np.hypot(px - x1, py - y1) < tolerance
+
+    u = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / (line_mag ** 2)
+    if u < 0.0 or u > 1.0:
         return False
 
-    u: float = (dot11 * dot02 - dot01 * dot12) / denom
-    v: float = (dot00 * dot12 - dot01 * dot02) / denom
-
-    # Check if point is in triangle
-    return (u >= -1e-8) and (v >= -1e-8) and (u + v <= 1 + 1e-8)
+    ix = x1 + u * (x2 - x1)
+    iy = y1 + u * (y2 - y1)
+    return np.hypot(px - ix, py - iy) <= tolerance
 
 # Unit Tests
 class TestShapeHierarchy(unittest.TestCase):
@@ -558,6 +610,7 @@ class TestShapeHierarchy(unittest.TestCase):
             plt.close(fig)
 
     def test_alignment_C_T_S(self):
+        """Test Circle > Triangle > Square hierarchy"""
         hierarchy = ['circle', 'triangle', 'square']
         fig = plt.figure()
         try:
@@ -574,13 +627,13 @@ class TestShapeHierarchy(unittest.TestCase):
             triangle.set_parent(circle)
             square.set_parent(triangle)
 
-            # Get vertices and positions
+            # Get vertices
             square_vertices = square.get_vertices()
             triangle_vertices = triangle.get_vertices()
-            
+
             # Check each square vertex is within the triangle
             for x, y in square_vertices:
-                self.assertTrue(point_in_triangle(x, y, T), 
+                self.assertTrue(point_in_polygon(x, y, triangle_vertices), 
                               f"Square vertex ({x}, {y}) not inside Triangle.")
 
             # Check triangle vertices are within the circle
@@ -591,6 +644,7 @@ class TestShapeHierarchy(unittest.TestCase):
             plt.close(fig)
 
     def test_alignment_S_T_C(self):
+        """Test Square > Triangle > Circle hierarchy"""
         hierarchy = ['square', 'triangle', 'circle']
         fig = plt.figure()
         try:
@@ -607,23 +661,28 @@ class TestShapeHierarchy(unittest.TestCase):
             triangle.set_parent(square)
             circle.set_parent(triangle)
 
-            # Get vertices and positions
+            # Get vertices
             circle_vertices = circle.get_vertices()
             triangle_vertices = triangle.get_vertices()
-            
+            square_vertices = square.get_vertices()
+
+            # Use a larger tolerance for edge cases
+            tolerance = 1e-8
+
             # Check each circle vertex is within the triangle
             for x, y in circle_vertices:
-                self.assertTrue(point_in_triangle(x, y, T), 
+                self.assertTrue(point_in_polygon(x, y, triangle_vertices, tolerance), 
                               f"Circle vertex ({x}, {y}) not inside Triangle.")
 
-            # Check triangle vertices are within the square
+            # Check triangle vertices are within or on the square
             for x, y in triangle_vertices:
-                self.assertTrue(point_in_square(x, y, S), 
+                self.assertTrue(point_in_polygon(x, y, square_vertices, tolerance), 
                               f"Triangle vertex ({x}, {y}) not inside Square.")
         finally:
             plt.close(fig)
 
     def test_alignment_T_S_C(self):
+        """Test Triangle > Square > Circle hierarchy"""
         hierarchy = ['triangle', 'square', 'circle']
         fig = plt.figure()
         try:
@@ -640,35 +699,40 @@ class TestShapeHierarchy(unittest.TestCase):
             square.set_parent(triangle)
             circle.set_parent(square)
 
-            # Get vertices and positions using the positioner system
+            # Get vertices
             circle_vertices = circle.get_vertices()
-            square_pos = square._positioner.get_position(square, triangle)
-            circle_pos = circle._positioner.get_position(circle, square)
+            square_vertices = square.get_vertices()
+            triangle_vertices = triangle.get_vertices()
 
-            # Check each vertex is within parent shape
+            # Use a larger tolerance for edge cases
+            tolerance = 1e-8
+
+            # Check each circle vertex is within the square
             for x, y in circle_vertices:
-                self.assertTrue(point_in_square(x, y, S, center=square_pos), 
+                self.assertTrue(point_in_polygon(x, y, square_vertices, tolerance), 
                               f"Circle vertex ({x}, {y}) not inside Square.")
 
-            square_vertices = square.get_vertices()
+            # Check square vertices are within the triangle
             for x, y in square_vertices:
-                self.assertTrue(point_in_triangle(x, y, T, rotate_base_down=True), 
+                self.assertTrue(point_in_polygon(x, y, triangle_vertices, tolerance), 
                               f"Square vertex ({x}, {y}) not inside Triangle.")
         finally:
             plt.close(fig)
     def check_vertices_in_shape(self, vertices: List[Tuple[float, float]], 
                                 container_shape: Shape, 
                                 shape_name: str,
-                                container_name: str) -> None:
+                                container_name: str,
+                                tolerance: float = 1e-8) -> None:
         """Helper method to check if vertices are inside a containing shape."""
         for x, y in vertices:
             if isinstance(container_shape, Circle):
                 inside = point_in_circle(x, y, container_shape.radius)
             elif isinstance(container_shape, Square):
-                inside = point_in_square(x, y, container_shape.side_length)
+                container_vertices = container_shape.get_vertices()
+                inside = point_in_polygon(x, y, container_vertices, tolerance)
             elif isinstance(container_shape, Triangle):
-                inside = point_in_triangle(x, y, container_shape.side_length, 
-                                        container_shape.rotate_base_down)
+                container_vertices = container_shape.get_vertices()
+                inside = point_in_polygon(x, y, container_vertices, tolerance)
             else:
                 raise ValueError(f"Unknown container shape type: {type(container_shape)}")
                 
