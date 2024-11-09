@@ -29,8 +29,10 @@ This script serves as a test case for these challenges, implementing six differe
 ```python -m venv venv```
 
 **Activate virtual environment**
+
 **On Windows:**
 ```.\venv\Scripts\activate```
+
 **On Unix or MacOS:**
 ```source venv/bin/activate```
 
